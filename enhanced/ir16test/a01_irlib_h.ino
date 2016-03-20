@@ -36,7 +36,7 @@
 // If IRLIB_TRACE is defined, some debugging information about the decode will be printed
 // IRLIB_TEST must be defined for the IRtest unittests to work.  It will make some
 // methods virtual, which will be slightly slower, which is why it is optional.
-//#define IRLIB_TRACE
+#define IRLIB_TRACE
 // #define IRLIB_TEST
 
 /* If not using the IRrecv class but only using IRrecvPCI or IRrecvLoop you can eliminate
@@ -73,9 +73,12 @@ typedef char IRTYPES; //formerly was an enum
 #define PANASONIC_OLD 5
 #define JVC 6
 #define NECX 7
-//#define ADDITIONAL (number) //make additional protocol 8 and change HASH_CODE to 9
-#define HASH_CODE 8
+#define MY_PANASONIC 8 //make additional protocol 8 and change HASH_CODE to 9
+#define HASH_CODE 9
 #define LAST_PROTOCOL HASH_CODE
+
+#define BUFF_SIZE     16
+#define BUFF_MAX_BITS (32 * BUFF_SIZE)
 
 const __FlashStringHelper *Pnames(IRTYPES Type); //Returns a character string that is name of protocol.
 
@@ -87,6 +90,9 @@ public:
   IRTYPES decode_type;           // NEC, SONY, RC5, UNKNOWN etc.
   unsigned long value;           // Decoded value
   unsigned char bits;            // Number of bits in decoded value
+  unsigned char buff_value[BUFF_SIZE];           // Decoded value
+  unsigned long buff_0_bits;              // Number of bits in decoded buffer index 0
+  unsigned long buff_total_bits;          // Number of bits in decoded buffer
   volatile unsigned int *rawbuf; // Raw intervals in microseconds
   unsigned char rawlen;          // Number of records in rawbuf.
   bool IgnoreHeader;             // Relaxed header detection allows AGC to settle
@@ -94,12 +100,18 @@ public:
   virtual bool decode(void);     // This base routine always returns false override with your routine
   bool decodeGeneric(unsigned char Raw_Count, unsigned int Head_Mark, unsigned int Head_Space, 
                      unsigned int Mark_One, unsigned int Mark_Zero, unsigned int Space_One, unsigned int Space_Zero);
+  bool decodeBuffGeneric(unsigned char Raw_Count, unsigned int Head_Mark, unsigned int Head_Space, 
+                     unsigned int Mark_One, unsigned int Mark_Zero, unsigned int Space_One, unsigned int Space_Zero);
+  void shiftBitIntoBuff(unsigned char new_bit);
+  void clearBuff(void);
   virtual void DumpResults (void);
   void UseExtnBuf(void *P); //Normally uses same rawbuf as IRrecv. Use this to define your own buffer.
   void copyBuf (IRdecodeBase *source);//copies rawbuf and rawlen from one decoder to another
 protected:
   unsigned char offset;           // Index into rawbuf used various places
 };
+
+
 
 class IRdecodeHash: public virtual IRdecodeBase
 {
@@ -165,6 +177,13 @@ public:
   virtual bool decode(void);
 };
 
+class IRdecodeMyPanasonic: public virtual IRdecodeBase 
+{
+public:
+  virtual bool decode(void);
+};
+
+
 // main class for decoding all supported protocols
 class IRdecode: 
 public virtual IRdecodeNEC,
@@ -172,6 +191,7 @@ public virtual IRdecodeSony,
 public virtual IRdecodeRC5,
 public virtual IRdecodeRC6,
 public virtual IRdecodePanasonic_Old,
+public virtual IRdecodeMyPanasonic,
 public virtual IRdecodeJVC,
 public virtual IRdecodeNECx
 // , public virtual IRdecodeADDITIONAL //add additional protocols here

@@ -39,7 +39,7 @@ volatile irparams_t irparams;
 const __FlashStringHelper *Pnames(IRTYPES Type) {
   if(Type>LAST_PROTOCOL) Type=UNKNOWN;
   // You can add additional strings before the entry for hash code.
-  const __FlashStringHelper *Names[LAST_PROTOCOL+1]={F("Unknown"),F("NEC"),F("Sony"),F("RC5"),F("RC6"),F("Panasonic Old"),F("JVC"),F("NECx"),F("Hash Code")};
+  const __FlashStringHelper *Names[LAST_PROTOCOL+1]={F("Unknown"),F("NEC"),F("Sony"),F("RC5"),F("RC6"),F("Panasonic Old"),F("JVC"),F("NECx"),F("MyPanasonic"),F("Hash Code")};
   return Names[Type];
 };
 
@@ -306,9 +306,20 @@ void IRdecodeBase::DumpResults(void) {
   if(decode_type<=LAST_PROTOCOL){
     Serial.print(F("Decoded ")); Serial.print(Pnames(decode_type));
 	Serial.print(F("(")); Serial.print(decode_type,DEC);
-    Serial.print(F("): Value:")); Serial.print(value, HEX);
+    Serial.print(F("): Value:")); Serial.println(value, HEX);
+
+    Serial.print(F("): Value_buff [")); 
+    for (int idx=BUFF_SIZE-1; idx >= 0; idx--) {
+      if (buff_value[idx] < 16) Serial.print("0");
+      Serial.print(buff_value[idx], HEX);
+      Serial.print(" ");
+    }
+    Serial.println("]");
   };
   Serial.print(F(" ("));  Serial.print(bits, DEC); Serial.println(F(" bits)"));
+  Serial.print(F(" ("));  Serial.print(buff_total_bits, DEC); Serial.print(":"); Serial.print(buff_0_bits, DEC); Serial.println(F(" bits)"));
+  buff_0_bits = 0;
+  buff_total_bits = 0;
   Serial.print(F("Raw samples(")); Serial.print(rawlen, DEC);
   Serial.print(F("): Gap:")); Serial.println(rawbuf[0], DEC);
   Serial.print(F("  Head: m")); Serial.print(rawbuf[1], DEC);
@@ -403,6 +414,86 @@ bool IRdecodeBase::decodeGeneric(unsigned char Raw_Count, unsigned int Head_Mark
   return true;
 }
 
+bool IRdecodeBase::decodeBuffGeneric(unsigned char Raw_Count, unsigned int Head_Mark, unsigned int Head_Space, 
+                                 unsigned int Mark_One, unsigned int Mark_Zero, unsigned int Space_One, unsigned int Space_Zero) {
+// If raw samples count or head mark are zero then don't perform these tests.
+// Some protocols need to do custom header work.
+  unsigned char Max; offset=1;
+  clearBuff();
+  if (Raw_Count) {if (rawlen != Raw_Count) return RAW_COUNT_ERROR;}
+  if(!IgnoreHeader) {
+    if (Head_Mark) {
+	  if (!MATCH(rawbuf[offset],Head_Mark)) return HEADER_MARK_ERROR(Head_Mark);
+	}
+  }
+  offset++;
+  if (Head_Space) {if (!MATCH(rawbuf[offset],Head_Space)) return HEADER_SPACE_ERROR(Head_Space);}
+
+  if (Mark_One) {//Length of a mark indicates data "0" or "1". Space_Zero is ignored.
+    offset=2;//skip initial gap plus header Mark.
+    Max=rawlen;
+    while (offset < Max) {
+      if (!MATCH(rawbuf[offset], Space_One)) return DATA_SPACE_ERROR(Space_One);
+      offset++;
+      if (MATCH(rawbuf[offset], Mark_One)) {
+        shiftBitIntoBuff(1);
+      } 
+      else if (MATCH(rawbuf[offset], Mark_Zero)) {
+        shiftBitIntoBuff(0);
+      } 
+      else return DATA_MARK_ERROR(Mark_Zero);
+      offset++;
+    }
+    bits = (offset - 1) / 2;
+  }
+  else {//Mark_One was 0 therefore length of a space indicates data "0" or "1".
+    Max=rawlen-1; //ignore stop bit
+    offset=3;//skip initial gap plus two header items
+    while (offset < Max) {
+      if (!MATCH (rawbuf[offset],Mark_Zero)) return DATA_MARK_ERROR(Mark_Zero);
+      offset++;
+      if (MATCH(rawbuf[offset],Space_One)) {
+                shiftBitIntoBuff(1);
+      } 
+      else if (MATCH (rawbuf[offset],Space_Zero)) {
+        shiftBitIntoBuff(0);
+      } 
+      else return DATA_SPACE_ERROR(Space_Zero);
+      offset++;
+    }
+    bits = (offset - 1) / 2 -1;//didn't encode stop bit
+  }
+  // Success
+  return true;
+}
+
+void IRdecodeBase::shiftBitIntoBuff(unsigned char new_bit)
+{
+  if (buff_0_bits == 8) {  // Word is full ... move up in array
+    for (int i = BUFF_SIZE-1; i > 0; i--) {
+      buff_value[i] = buff_value[i-1];
+    }
+    buff_value[0] = 0;
+    buff_0_bits = 0;
+  }
+  buff_value[0] = (buff_value[0] << 1) | new_bit;
+  buff_0_bits++;
+  buff_total_bits++;
+}
+
+void IRdecodeBase::clearBuff(void)
+{
+  for (int i = 0; i < BUFF_SIZE; i++)
+  {
+    buff_value[i] = 0;
+  }
+  buff_0_bits = 0;
+  buff_total_bits = 0;
+}
+
+
+
+
 /*
  * This routine has been modified significantly from the original IRremote.
  * It assumes you've already called IRrecvBase::GetResults and it was true.
@@ -415,13 +506,14 @@ bool IRdecodeBase::decodeGeneric(unsigned char Raw_Count, unsigned int Head_Mark
  * Note: Don't forget to call IRrecvBase::resume(); after decoding is complete.
  */
 bool IRdecode::decode(void) {
-  if (IRdecodeNEC::decode()) return true;
-  if (IRdecodeSony::decode()) return true;
-  if (IRdecodeRC5::decode()) return true;
-  if (IRdecodeRC6::decode()) return true;
-  if (IRdecodePanasonic_Old::decode()) return true;
-  if (IRdecodeNECx::decode()) return true;
-  if (IRdecodeJVC::decode()) return true;
+//  if (IRdecodeNEC::decode()) return true;
+//  if (IRdecodeSony::decode()) return true;
+//  if (IRdecodeRC5::decode()) return true;
+//  if (IRdecodeRC6::decode()) return true;
+//  if (IRdecodePanasonic_Old::decode()) return true;
+  if (IRdecodeMyPanasonic::decode()) return true;
+//  if (IRdecodeNECx::decode()) return true;
+//  if (IRdecodeJVC::decode()) return true;
 //if (IRdecodeADDITIONAL::decode()) return true;//add additional protocols here
 //Deliberately did not add hash code decoding. If you get decode_type==UNKNOWN and
 // you want to know a hash code you can call IRhash::decode() yourself.
@@ -494,6 +586,14 @@ bool IRdecodePanasonic_Old::decode(void) {
 //  if (S1!=S2) return IRLIB_REJECTION_MESSAGE(F("inverted bit redundancy"));
   // Success
   decode_type = PANASONIC_OLD;
+  return true;
+}
+
+bool IRdecodeMyPanasonic::decode(void) {
+  IRLIB_ATTEMPT_MESSAGE(F("MyPanasonic"));
+  //if(!decodeBuffGeneric(0,3380,1890,0,420,1270,420)) return true;
+  decodeBuffGeneric(0,3380,1890,0,400,1350,500);
+  decode_type = MY_PANASONIC;
   return true;
 }
 
